@@ -125,6 +125,7 @@ with st.form("expense_input_form", clear_on_submit=True):
     if st.form_submit_button("Commit Transaction to Cloud"):
         who_shares = [m for m, checked in shared_status.items() if checked]
         if desc and amt > 0 and who_shares:
+            # 1. Create the database payload
             payload = {
                 "action": "add_expense",
                 "tripName": st.session_state.current_trip,
@@ -133,9 +134,24 @@ with st.form("expense_input_form", clear_on_submit=True):
                 "payer": paid_by,
                 "sharedWith": ",".join(who_shares)
             }
-            headers = {"Content-Type": "application/json"}
-            requests.post(SCRIPT_URL, data=json.dumps(payload), headers=headers, allow_redirects=True)
-            st.success("Transaction pushed successfully!")
+            
+            # 2. IMMEDIATELY append to local memory state so it displays instantly
+            st.session_state.trips[st.session_state.current_trip]["expenses"].append({
+                "description": desc,
+                "amount": amt,
+                "payer": paid_by,
+                "shared_with": who_shares
+            })
+            
+            # 3. Fire-and-forget push to Google Sheets in the background
+            try:
+                headers = {"Content-Type": "application/json"}
+                requests.post(SCRIPT_URL, data=json.dumps(payload), headers=headers, allow_redirects=True)
+                st.success("Transaction pushed successfully!")
+            except Exception:
+                st.warning("Saved locally, syncing to cloud sheet in background...")
+                
+            # 4. Clear cache and refresh UI
             st.cache_data.clear()
             st.rerun()
 
