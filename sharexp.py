@@ -35,7 +35,7 @@ trip_options = list(st.session_state.trips.keys())
 selected_trip = st.sidebar.selectbox(
     "Select Active Trip:", 
     options=trip_options, 
-    index=trip_options.index(st.session_state.st.session_state.current_trip) if st.session_state.current_trip in trip_options else 0
+    index=trip_options.index(st.session_state.current_trip) if st.session_state.current_trip in trip_options else 0
 )
 st.session_state.current_trip = selected_trip
 
