@@ -3,77 +3,76 @@ import pandas as pd
 import requests
 import json
 
-st.set_page_config(page_title="Cloud Persistent Splitter", layout="wide")
+st.set_page_config(page_title="Fast Persistent Splitter", layout="wide")
 
-st.title("📊 Persistent Group Expense Splitter")
-st.caption("All data is synchronized securely with Google Sheets via API.")
+st.title("⚡ Ultra-Fast Persistent Group Expense Splitter")
+st.caption("Performance optimized: Using local memory cache for instant response times.")
 
-# -----------------------------------------------------------------------------
-# 1. API DATA FETCH FUNCTIONS
-# -----------------------------------------------------------------------------
 SCRIPT_URL = st.secrets["script_url"]
 
-@st.cache_data(ttl=2)
+# -----------------------------------------------------------------------------
+# 1. BULLETPROOF DATA INITIALIZATION (RUNS ONCE ON INITIAL LOAD)
+# -----------------------------------------------------------------------------
 def load_data_from_api():
     try:
-        response = requests.get(f"{SCRIPT_URL}?action=read")
+        # High timeout ensures it doesn't hang indefinitely if network dips
+        response = requests.get(f"{SCRIPT_URL}?action=read", timeout=5)
         data = response.json()
         
-        # Parse Trips
         trips_raw = data.get("trips", [])
-        if len(trips_raw) > 1:
-            trips_df = pd.DataFrame(trips_raw[1:], columns=trips_raw[0])
-        else:
-            trips_df = pd.DataFrame(columns=["Trip Name", "Members"])
+        trips_df = pd.DataFrame(trips_raw[1:], columns=trips_raw[0]) if len(trips_raw) > 1 else pd.DataFrame(columns=["Trip Name", "Members"])
             
-        # Parse Expenses
         exp_raw = data.get("expenses", [])
-        if len(exp_raw) > 1:
-            expenses_df = pd.DataFrame(exp_raw[1:], columns=exp_raw[0])
-        else:
-            expenses_df = pd.DataFrame(columns=["Trip Name", "Description", "Amount", "Payer", "Shared With"])
+        expenses_df = pd.DataFrame(exp_raw[1:], columns=exp_raw[0]) if len(exp_raw) > 1 else pd.DataFrame(columns=["Trip Name", "Description", "Amount", "Payer", "Shared With"])
             
         return trips_df.dropna(how='all'), expenses_df.dropna(how='all')
-    except Exception as e:
+    except Exception:
         return pd.DataFrame(columns=["Trip Name", "Members"]), pd.DataFrame(columns=["Trip Name", "Description", "Amount", "Payer", "Shared With"])
 
-trips_df, expenses_df = load_data_from_api()
+# Local Cache Init: If this is the first run, pull from the cloud once.
+if "trips" not in st.session_state:
+    with st.spinner("🚀 Initializing Cloud Data Sync... Please wait..."):
+        trips_df, expenses_df = load_data_from_api()
+        st.session_state.trips = {}
+        
+        # Normalize columns
+        trips_df.columns = [str(c).strip().lower() for c in trips_df.columns]
+        expenses_df.columns = [str(c).strip().lower() for c in expenses_df.columns]
+        
+        for _, row in trips_df.iterrows():
+            t_name = str(row.get("trip name", "")).strip().upper()
+            m_list = [m.strip().upper() for m in str(row.get("members", "")).split(",") if m.strip()]
+            if t_name and t_name != "NAN" and t_name != "":
+                st.session_state.trips[t_name] = {"members": m_list, "expenses": []}
+                
+        for _, row in expenses_df.iterrows():
+            t_name = str(row.get("trip name", "")).strip().upper()
+            if t_name in st.session_state.trips:
+                sw_list = [m.strip().upper() for m in str(row.get("shared with", "")).split(",") if m.strip()]
+                st.session_state.trips[t_name]["expenses"].append({
+                    "description": str(row.get("description", "Expense")),
+                    "amount": float(row.get("amount", 0.0)) if row.get("amount") else 0.0,
+                    "payer": str(row.get("payer", "")).strip().upper(),
+                    "shared_with": sw_list
+                })
 
-# -----------------------------------------------------------------------------
-# 2. STATE MANAGER
-# -----------------------------------------------------------------------------
-if "trips" not in st.session_state or st.sidebar.button("🔄 Force Refresh Sync"):
-    st.session_state.trips = {}
-    
-    for _, row in trips_df.iterrows():
-        t_name = str(row["Trip Name"]).strip()
-        m_list = [m.strip().upper() for m in str(row["Members"]).split(",") if m.strip()]
-        if t_name and t_name != "nan":
-            st.session_state.trips[t_name] = {"members": m_list, "expenses": []}
-            
-    for _, row in expenses_df.iterrows():
-        t_name = str(row["Trip Name"]).strip()
-        if t_name in st.session_state.trips:
-            sw_list = [m.strip().upper() for m in str(row["Shared With"]).split(",") if m.strip()]
-            st.session_state.trips[t_name]["expenses"].append({
-                "description": str(row["Description"]),
-                "amount": float(row["Amount"]) if row["Amount"] else 0.0,
-                "payer": str(row["Payer"]).strip().upper(),
-                "shared_with": sw_list
-            })
-
+# Fallback defaults if cloud returns empty
 if not st.session_state.trips:
-    st.session_state.trips = {
-        "DEFAULT TRIP": {"members": ["KASSAS", "SAEID", "ZIAD", "HESHAM"], "expenses": []}
-    }
+    st.session_state.trips = {"DEFAULT TRIP": {"members": ["KASSAS", "SAEID", "ZIAD", "HESHAM"], "expenses": []}}
 
 if "current_trip" not in st.session_state or st.session_state.current_trip not in st.session_state.trips:
     st.session_state.current_trip = list(st.session_state.trips.keys())[0]
 
 # -----------------------------------------------------------------------------
-# 3. SIDEBAR: TRIP NAVIGATION
+# 2. SIDEBAR: TRIP NAVIGATION & SYNC BUTTONS
 # -----------------------------------------------------------------------------
 st.sidebar.header("✈️ Trip Management")
+
+# Manual Sync Button (Only pulls when you ask it to, keeping interactions lag-free)
+if st.sidebar.button("🔄 Sync & Refresh from Cloud", use_container_width=True):
+    del st.session_state.trips
+    st.rerun()
+
 trip_options = list(st.session_state.trips.keys())
 selected_trip = st.sidebar.selectbox("Select Active Trip:", options=trip_options, index=trip_options.index(st.session_state.current_trip))
 st.session_state.current_trip = selected_trip
@@ -88,13 +87,16 @@ with st.sidebar.form("new_trip_form", clear_on_submit=True):
         if clean_name and clean_name not in st.session_state.trips and raw_members.strip():
             m_list = list(dict.fromkeys([n.strip().upper() for n in raw_members.split(",") if n.strip()]))
             
-            # Send payload to script web app
-            payload = {"action": "add_trip", "tripName": clean_name, "members": ",".join(m_list)}
-            headers = {"Content-Type": "application/json"}
-            requests.post(SCRIPT_URL, data=json.dumps(payload), headers=headers, allow_redirects=True)
-            
+            # Save to local session instantly for zero UI lag
+            st.session_state.trips[clean_name] = {"members": m_list, "expenses": []}
             st.session_state.current_trip = clean_name
-            st.cache_data.clear()
+            
+            # Background Cloud write
+            try:
+                payload = {"action": "add_trip", "tripName": clean_name, "members": ",".join(m_list)}
+                requests.post(SCRIPT_URL, data=json.dumps(payload), headers={"Content-Type": "application/json"}, allow_redirects=True, timeout=3)
+            except Exception:
+                pass
             st.rerun()
 
 st.sidebar.write(f"### 📍 Active: **{st.session_state.current_trip}**")
@@ -102,7 +104,7 @@ active_members = st.session_state.trips[st.session_state.current_trip]["members"
 st.sidebar.write("**Members:**", ", ".join(active_members))
 
 # -----------------------------------------------------------------------------
-# 4. EXPENSE FORM
+# 3. EXPENSE FORM
 # -----------------------------------------------------------------------------
 st.header(f"_Trip Instance: {st.session_state.current_trip}_")
 current_data = st.session_state.trips[st.session_state.current_trip]
@@ -122,47 +124,35 @@ with st.form("expense_input_form", clear_on_submit=True):
         with checkbox_cols[idx % len(checkbox_cols)]:
             shared_status[member] = st.checkbox(member, value=True, key=f"share_{member}")
             
-    if st.form_submit_button("Commit Transaction to Cloud"):
+    if st.form_submit_button("Commit Transaction"):
         who_shares = [m for m, checked in shared_status.items() if checked]
         if desc and amt > 0 and who_shares:
-            # 1. Create the database payload
-            payload = {
-                "action": "add_expense",
-                "tripName": st.session_state.current_trip,
-                "description": desc,
-                "amount": amt,
-                "payer": paid_by,
-                "sharedWith": ",".join(who_shares)
-            }
+            # 1. Update local state immediately (Zero Lag)
+            trip_expenses.append({"description": desc, "amount": amt, "payer": paid_by, "shared_with": who_shares})
             
-            # 2. IMMEDIATELY append to local memory state so it displays instantly
-            st.session_state.trips[st.session_state.current_trip]["expenses"].append({
-                "description": desc,
-                "amount": amt,
-                "payer": paid_by,
-                "shared_with": who_shares
-            })
-            
-            # 3. Fire-and-forget push to Google Sheets in the background
+            # 2. Push to cloud sheet in background
             try:
-                headers = {"Content-Type": "application/json"}
-                requests.post(SCRIPT_URL, data=json.dumps(payload), headers=headers, allow_redirects=True)
-                st.success("Transaction pushed successfully!")
+                payload = {
+                    "action": "add_expense",
+                    "tripName": st.session_state.current_trip,
+                    "description": desc,
+                    "amount": amt,
+                    "payer": paid_by,
+                    "sharedWith": ",".join(who_shares)
+                }
+                requests.post(SCRIPT_URL, data=json.dumps(payload), headers={"Content-Type": "application/json"}, allow_redirects=True, timeout=3)
             except Exception:
-                st.warning("Saved locally, syncing to cloud sheet in background...")
-                
-            # 4. Clear cache and refresh UI
-            st.cache_data.clear()
+                pass
             st.rerun()
 
 # -----------------------------------------------------------------------------
-# 5. TABLES & CALCULATIONS
+# 4. TABLES & CALCULATIONS (PULLS INSTANTLY FROM MEMORY)
 # -----------------------------------------------------------------------------
 st.header("📋 Shared Expenses Ledger")
 if trip_expenses:
     matrix_rows = []
     for exp in trip_expenses:
-        row = {"Description": exp["description"], "Amount": exp["amount"], "Who Paid?": exp["payer"], "# Shared": len(exp["shared_with"])}
+        row = {"Description": exp["description"], "Amount": exp["amount"], "Who Paid?": exp["payer"], "# Shared": len(exp['shared_with'])}
         for m in trip_members: row[m] = "x" if m in exp["shared_with"] else ""
         matrix_rows.append(row)
     st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True)
