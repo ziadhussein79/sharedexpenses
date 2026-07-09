@@ -134,7 +134,7 @@ with st.form("expense_input_form", clear_on_submit=True):
                 "sharedWith": ",".join(who_shares)
             }
             headers = {"Content-Type": "application/json"}
-requests.post(SCRIPT_URL, data=json.dumps(payload), headers=headers, allow_redirects=True)
+            requests.post(SCRIPT_URL, data=json.dumps(payload), headers=headers, allow_redirects=True)
             st.success("Transaction pushed successfully!")
             st.cache_data.clear()
             st.rerun()
