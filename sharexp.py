@@ -88,9 +88,10 @@ with st.sidebar.form("new_trip_form", clear_on_submit=True):
         if clean_name and clean_name not in st.session_state.trips and raw_members.strip():
             m_list = list(dict.fromkeys([n.strip().upper() for n in raw_members.split(",") if n.strip()]))
             
-            # Send payload to script web app
-            payload = {"action": "add_trip", "tripName": clean_name, "members": ",".join(m_list)}
-            requests.post(SCRIPT_URL, data=json.dumps(payload))
+           # Send payload to script web app with redirects allowed
+payload = {"action": "add_trip", "tripName": clean_name, "members": ",".join(m_list)}
+headers = {"Content-Type": "application/json"}
+requests.post(SCRIPT_URL, data=json.dumps(payload), headers=headers, allow_redirects=True)
             
             st.session_state.current_trip = clean_name
             st.cache_data.clear()
@@ -132,7 +133,8 @@ with st.form("expense_input_form", clear_on_submit=True):
                 "payer": paid_by,
                 "sharedWith": ",".join(who_shares)
             }
-            requests.post(SCRIPT_URL, data=json.dumps(payload))
+            headers = {"Content-Type": "application/json"}
+requests.post(SCRIPT_URL, data=json.dumps(payload), headers=headers, allow_redirects=True)
             st.success("Transaction pushed successfully!")
             st.cache_data.clear()
             st.rerun()
